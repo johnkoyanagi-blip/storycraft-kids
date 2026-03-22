@@ -31,12 +31,6 @@ model ChildProfile {
   @@map("child_profiles")
 }
 
-enum StoryStatus {
-  in_progress
-  complete
-  shared
-}
-
 model Story {
   id             String      @id @default(cuid())
   childProfileId String      @map("child_profile_id")
@@ -44,7 +38,7 @@ model Story {
   genre          String
   setting        String
   theme          String
-  status         StoryStatus @default(in_progress)
+  status         String      @default("in_progress")
   artStyle       String      @map("art_style")
   isFavorite     Boolean     @default(false) @map("is_favorite")
   shareToken     String?     @unique @map("share_token")
