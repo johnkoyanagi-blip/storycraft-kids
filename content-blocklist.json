@@ -1,0 +1,10 @@
+{
+  "version": "1.0",
+  "terms": [
+    "kill", "murder", "blood", "gore", "weapon", "gun",
+    "drug", "alcohol", "cigarette", "vape",
+    "hate", "racist", "sexist",
+    "damn", "hell", "crap"
+  ],
+  "note": "Abbreviated for development. Full production list should have ~500 terms."
+}

@@ -1,0 +1,109 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Account {
+  id            String         @id @default(cuid())
+  email         String         @unique
+  passwordHash  String         @map("password_hash")
+  createdAt     DateTime       @default(now()) @map("created_at")
+  children      ChildProfile[]
+
+  @@map("accounts")
+}
+
+model ChildProfile {
+  id          String   @id @default(cuid())
+  accountId   String   @map("account_id")
+  displayName String   @map("display_name")
+  age         Int
+  avatarUrl   String?  @map("avatar_url")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  account  Account @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  stories  Story[]
+
+  @@map("child_profiles")
+}
+
+enum StoryStatus {
+  in_progress
+  complete
+  shared
+}
+
+model Story {
+  id             String      @id @default(cuid())
+  childProfileId String      @map("child_profile_id")
+  title          String?
+  genre          String
+  setting        String
+  theme          String
+  status         StoryStatus @default(in_progress)
+  artStyle       String      @map("art_style")
+  isFavorite     Boolean     @default(false) @map("is_favorite")
+  shareToken     String?     @unique @map("share_token")
+  shareRevokedAt DateTime?   @map("share_revoked_at")
+  createdAt      DateTime    @default(now()) @map("created_at")
+  updatedAt      DateTime    @updatedAt @map("updated_at")
+
+  childProfile ChildProfile @relation(fields: [childProfileId], references: [id], onDelete: Cascade)
+  beats        StoryBeat[]
+  pages        Page[]
+  contentFlags ContentFlag[]
+
+  @@map("stories")
+}
+
+model StoryBeat {
+  id                  String  @id @default(cuid())
+  storyId             String  @map("story_id")
+  sequenceNumber      Int     @map("sequence_number")
+  childChoice         String? @map("child_choice")
+  childInputType      String  @map("child_input_type")
+  generatedText       String  @map("generated_text")
+  isIllustrationMoment Boolean @default(false) @map("is_illustration_moment")
+  createdAt           DateTime @default(now()) @map("created_at")
+
+  story Story  @relation(fields: [storyId], references: [id], onDelete: Cascade)
+  page  Page?
+
+  @@unique([storyId, sequenceNumber])
+  @@map("story_beats")
+}
+
+model Page {
+  id               String  @id @default(cuid())
+  storyId          String  @map("story_id")
+  beatId           String  @unique @map("beat_id")
+  sequenceNumber   Int     @map("sequence_number")
+  storyText        String  @map("story_text")
+  aiBackgroundUrl  String? @map("ai_background_url")
+  childDrawingUrl  String? @map("child_drawing_url")
+  compositeUrl     String? @map("composite_url")
+  layoutTemplate   String  @default("classic") @map("layout_template")
+  createdAt        DateTime @default(now()) @map("created_at")
+
+  story Story     @relation(fields: [storyId], references: [id], onDelete: Cascade)
+  beat  StoryBeat @relation(fields: [beatId], references: [id])
+
+  @@unique([storyId, sequenceNumber])
+  @@map("pages")
+}
+
+model ContentFlag {
+  id          String   @id @default(cuid())
+  storyId     String   @map("story_id")
+  flaggedText String   @map("flagged_text")
+  filterLayer String   @map("filter_layer")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  story Story @relation(fields: [storyId], references: [id], onDelete: Cascade)
+
+  @@map("content_flags")
+}

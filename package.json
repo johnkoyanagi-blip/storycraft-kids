@@ -1,0 +1,46 @@
+{
+  "name": "storycraft-kids",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "next lint",
+    "test": "vitest"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.80.0",
+    "@auth/prisma-adapter": "^2.11.1",
+    "@prisma/client": "^7.5.0",
+    "@types/bcryptjs": "^2.4.6",
+    "@types/jspdf": "^1.3.3",
+    "bcryptjs": "^3.0.3",
+    "fabric": "^7.2.0",
+    "ioredis": "^5.10.1",
+    "jspdf": "^4.2.1",
+    "lucide-react": "^0.577.0",
+    "nanoid": "^5.1.7",
+    "next": "^16.2.1",
+    "next-auth": "^4.24.13",
+    "prisma": "^6.12.0",
+    "react": "^18",
+    "react-dom": "^18",
+    "replicate": "^1.4.0",
+    "uuid": "^13.0.0"
+  },
+  "devDependencies": {
+    "@testing-library/jest-dom": "^6.9.1",
+    "@testing-library/react": "^16.3.2",
+    "@types/node": "^20",
+    "@types/react": "^18",
+    "@types/react-dom": "^18",
+    "@types/uuid": "^10.0.0",
+    "eslint": "^8",
+    "eslint-config-next": "^16.2.1",
+    "postcss": "^8",
+    "tailwindcss": "^3.4.1",
+    "typescript": "^5",
+    "vitest": "^4.1.0"
+  }
+}
