@@ -142,7 +142,7 @@ export default function ProfilesPage() {
                   <select
                     value={newProfileAge}
                     onChange={(e) => setNewProfileAge(e.target.value)}
-                    className="w-full px-4 py-3 rounded-xl border-2 border-purple-200 focus:border-purple-500 focus:outline-none text-base"
+                    className="w-full px-4 py-3 rounded-xl border-2 border-purple-200 focus:border-purple-500 focus:outline-none text-base text-gray-900"
                   >
                     {Array.from({ length: 7 }, (_, i) => 6 + i).map((age) => (
                       <option key={age} value={age}>
