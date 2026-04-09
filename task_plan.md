@@ -17,13 +17,24 @@
 - [x] **SQLite Migration** — Switched from PostgreSQL to SQLite for zero-config local dev
 - [x] **In-Memory Cache** — Replaced Redis with Map-based cache for local dev
 - [x] **TypeScript & ESLint Fixes** — 0 type errors, 0 lint errors
+- [x] **Claude API integration working** — Model `claude-sonnet-4-6`, credits purchased, API key wired
+- [x] **Interactive story UX** — editable narrative, inline save, big Continue button, Undo/Rewrite quick actions, first-beat auto-generation, illustration mode suppressed for first 2 beats
+- [x] **Fabric.js v7 drawing canvas** — rewrote hook for v7 API (named imports, Promise APIs, `backgroundImage` as property). Callback-ref pattern so Fabric initializes when the canvas mounts inside a conditionally-rendered screen.
+- [x] **Undo/Redo fix** — tracks pre-mutation snapshots so each undo actually rolls back one step. Handles `object:added`/`modified`/`removed`, suppresses history during programmatic loads.
+- [x] **AI illustration pipeline fix** — generate endpoint derives `sceneDescription` from the latest beat itself; creates/updates the Page row; fallback prompt if beat text is too short.
+- [x] **Same-origin image proxy** — `/api/proxy-image` with Replicate hostname allowlist, used by `setBackgroundImage` for any cross-origin URL, so CORS never blocks Fabric and `toDataURL` stays untainted.
+- [x] **Upload endpoint Draw-Everything-Myself fix** — creates a Page record if one doesn't exist so saved drawings persist in all three modes.
+- [x] **View My Book link** — added to both the main story screen and the illustration-moment screen, routing to `/story/[storyId]/preview` (which already renders the FlipbookViewer composite pages).
 
 ## In Progress
 
-- [ ] **Registration Flow Bug** — App loads at localhost:3002, registration page renders, but `@prisma/client` module resolution error on Next.js 14. Needs `npx prisma generate` to complete on user's machine.
+_(nothing)_
 
 ## Remaining
 
+- [ ] **Drawing tools feature pass (deferred from this session)** — user picked all four: Shapes (circle/square/line), Stickers/stamps, Fill bucket, Text tool
+- [ ] **End-to-end verification in the browser** — confirm AI background actually loads, undo works, View My Book shows saved drawings
+- [ ] **API key rotation** — old Anthropic key `sk-ant-api03-qK1-...` may still be exposed in transcript
 - [ ] **Task 23: E2E Flow Test** — End-to-end test covering register → create profile → start story → generate beat → illustrate → export
 - [ ] **Task 24: Loading States & UX Polish** — Skeleton screens, error boundaries, transition animations
 - [ ] **Task 25: Deploy Config** — Vercel/Railway deployment setup, production database migration
