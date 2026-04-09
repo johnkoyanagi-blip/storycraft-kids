@@ -63,9 +63,12 @@ export async function POST(req: Request, { params }: { params: { storyId: string
   }
 
   return NextResponse.json({
-    beat, choices: beatResponse.choices,
+    beat,
+    storyText: beatResponse.storyText,
+    choices: beatResponse.choices,
     illustrationMoment: beatResponse.illustrationMoment,
-    page, arcPosition: beatResponse.arcPosition,
+    page,
+    arcPosition: beatResponse.arcPosition,
     suggestEnding: beatResponse.arcPosition === 'resolution',
   });
 }

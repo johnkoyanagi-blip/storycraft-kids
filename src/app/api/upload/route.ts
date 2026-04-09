@@ -5,10 +5,24 @@ import { prisma } from '@/lib/db';
 
 export async function POST(req: Request) {
   const session = await getServerSession(authOptions);
-  if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  if (!session) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  }
 
   try {
-    const { storyId, compositeUrl, childDrawingUrl, aiBackgroundUrl } = await req.json();
+    const {
+      storyId,
+      beatId,
+      compositeUrl,
+      childDrawingUrl,
+      aiBackgroundUrl,
+    }: {
+      storyId?: string;
+      beatId?: string;
+      compositeUrl?: string;
+      childDrawingUrl?: string;
+      aiBackgroundUrl?: string;
+    } = await req.json();
 
     if (!storyId || !compositeUrl) {
       return NextResponse.json(
@@ -17,30 +31,69 @@ export async function POST(req: Request) {
       );
     }
 
-    // Get the story to find the associated page
     const story = await prisma.story.findUnique({
       where: { id: storyId },
-      include: { pages: true },
+      include: {
+        beats: { orderBy: { sequenceNumber: 'desc' } },
+        pages: { orderBy: { sequenceNumber: 'desc' } },
+      },
     });
 
     if (!story) {
+      return NextResponse.json({ error: 'Story not found' }, { status: 404 });
+    }
+
+    // Resolve which beat/page this illustration belongs to.
+    // Preference order:
+    //   1. beatId explicitly passed by the client
+    //   2. A page that already has an aiBackgroundUrl but no compositeUrl
+    //   3. The most recent beat
+    let targetBeatId = beatId;
+    if (!targetBeatId) {
+      const pendingPage = story.pages.find(
+        (p) => p.aiBackgroundUrl && !p.compositeUrl
+      );
+      if (pendingPage) {
+        targetBeatId = pendingPage.beatId;
+      } else if (story.beats[0]) {
+        targetBeatId = story.beats[0].id;
+      }
+    }
+
+    if (!targetBeatId) {
       return NextResponse.json(
-        { error: 'Story not found' },
-        { status: 404 }
+        { error: 'Could not determine which beat to illustrate' },
+        { status: 400 }
       );
     }
 
-    // For now, update the first page with illustration moment
-    // In a full implementation, you'd track which beat/page the illustration is for
-    const pageToUpdate = story.pages.find((p: { aiBackgroundUrl: string | null }) => p.aiBackgroundUrl);
+    const existing = await prisma.page.findUnique({
+      where: { beatId: targetBeatId },
+    });
 
-    if (pageToUpdate) {
+    if (existing) {
       await prisma.page.update({
-        where: { id: pageToUpdate.id },
+        where: { id: existing.id },
         data: {
-          childDrawingUrl: childDrawingUrl || null,
           compositeUrl,
-          aiBackgroundUrl: aiBackgroundUrl || pageToUpdate.aiBackgroundUrl,
+          childDrawingUrl: childDrawingUrl || existing.childDrawingUrl,
+          aiBackgroundUrl: aiBackgroundUrl || existing.aiBackgroundUrl,
+        },
+      });
+    } else {
+      // No pre-existing page (e.g. "Draw Everything Myself" path skipped
+      // background generation). Create one now.
+      const beat = story.beats.find((b) => b.id === targetBeatId);
+      const pageCount = story.pages.length;
+      await prisma.page.create({
+        data: {
+          storyId,
+          beatId: targetBeatId,
+          sequenceNumber: pageCount + 1,
+          storyText: beat?.generatedText ?? '',
+          compositeUrl,
+          childDrawingUrl: childDrawingUrl || null,
+          aiBackgroundUrl: aiBackgroundUrl || null,
         },
       });
     }
@@ -48,10 +101,11 @@ export async function POST(req: Request) {
     return NextResponse.json({
       success: true,
       storyId,
+      beatId: targetBeatId,
       message: 'Illustration saved successfully',
     });
   } catch (error) {
-    console.error('Upload error:', error);
+    console.error('[StoryCraft] Upload error:', error);
     return NextResponse.json(
       { error: 'Failed to save illustration' },
       { status: 500 }

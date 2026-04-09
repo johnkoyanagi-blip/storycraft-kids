@@ -10,21 +10,23 @@ interface WizardStep {
 
 interface WizardShellProps {
   steps: WizardStep[];
-  onComplete: (data: any) => Promise<void>;
+  onComplete: () => Promise<void>;
 }
 
 export function WizardShell({ steps, onComplete }: WizardShellProps) {
   const [currentStep, setCurrentStep] = useState(0);
-  const [data] = useState<any>({});
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
 
   async function handleNext() {
     if (currentStep === steps.length - 1) {
       setLoading(true);
+      setError('');
       try {
-        await onComplete(data);
+        await onComplete();
       } catch (err) {
         console.error('Failed to complete wizard:', err);
+        setError('Something went wrong. Please try again!');
         setLoading(false);
       }
     } else {
@@ -73,6 +75,8 @@ export function WizardShell({ steps, onComplete }: WizardShellProps) {
                 : null}
           </div>
 
+          {error && <p className="text-red-500 text-sm text-center font-semibold mb-4">{error}</p>}
+
           <div className="flex gap-4 justify-between pt-6 border-t border-purple-100">
             <Button
               variant="ghost"
@@ -95,8 +99,4 @@ export function WizardShell({ steps, onComplete }: WizardShellProps) {
       </div>
     </div>
   );
-}
-
-export function useWizardData() {
-  return useState<any>({});
 }

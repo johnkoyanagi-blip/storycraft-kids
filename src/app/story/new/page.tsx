@@ -37,7 +37,7 @@ export default function StoryNewPage() {
     return null;
   }
 
-  async function handleComplete(data: WizardData) {
+  async function handleComplete() {
     if (!profile) return;
     try {
       const res = await fetch('/api/stories', {
@@ -45,10 +45,11 @@ export default function StoryNewPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           profileId: profile.id,
-          genre: data.genre,
-          setting: data.setting,
-          theme: data.theme,
-          characters: data.characters,
+          genre: wizardData.genre,
+          setting: wizardData.setting,
+          theme: wizardData.theme,
+          characters: wizardData.characters,
+          artStyle: wizardData.genre || 'classic',
         }),
       });
 

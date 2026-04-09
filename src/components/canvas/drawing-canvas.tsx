@@ -1,37 +1,24 @@
 'use client';
 
-import { useEffect } from 'react';
-import { useDrawingCanvas } from '@/hooks/use-drawing-canvas';
+import { forwardRef } from 'react';
 
 interface DrawingCanvasProps {
-  backgroundUrl?: string | null;
-  fallbackColor?: string;
+  className?: string;
 }
 
-export function DrawingCanvas({
-  backgroundUrl,
-  fallbackColor = '#ffffff',
-}: DrawingCanvasProps) {
-  const { containerRef, canvasRef, setBackgroundImage } = useDrawingCanvas();
-
-  // Load background image when URL changes
-  useEffect(() => {
-    if (backgroundUrl && canvasRef.current) {
-      setBackgroundImage(backgroundUrl);
-    } else if (canvasRef.current) {
-      // Set fallback color
-      canvasRef.current.backgroundColor = fallbackColor;
-      canvasRef.current.renderAll();
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [backgroundUrl, fallbackColor]);
-
-  return (
-    <div ref={containerRef} className="flex justify-center">
-      <canvas
-        id="drawing-canvas"
-        className="border-4 border-purple-300 rounded-2xl shadow-lg max-w-full h-auto"
-      />
-    </div>
-  );
-}
+export const DrawingCanvas = forwardRef<HTMLCanvasElement, DrawingCanvasProps>(
+  function DrawingCanvas({ className }, ref) {
+    return (
+      <div
+        className={
+          className ??
+          'inline-block border-4 border-purple-300 rounded-2xl shadow-lg overflow-hidden bg-white'
+        }
+      >
+        {/* Fabric controls width/height on this element. Do NOT apply Tailwind
+            sizing classes here — they will fight Fabric's inline styles. */}
+        <canvas ref={ref} />
+      </div>
+    );
+  }
+);

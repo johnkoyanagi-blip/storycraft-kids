@@ -1,7 +1,7 @@
 'use client';
 import { useSession } from 'next-auth/react';
 import { useRouter } from 'next/navigation';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { LoadingSpinner } from '@/components/ui/loading-spinner';
@@ -24,6 +24,8 @@ export default function IllustratePage({ params }: { params: { storyId: string }
 
   const {
     canvasRef,
+    canvasElRef,
+    isReady,
     drawingState,
     canUndo,
     canRedo,
@@ -33,8 +35,20 @@ export default function IllustratePage({ params }: { params: { storyId: string }
     undo,
     redo,
     clearAll,
+    setBackgroundImage,
+    setBackgroundColor,
     exportAsDataUrl,
   } = useDrawingCanvas();
+
+  // Load AI background when URL changes
+  useEffect(() => {
+    if (!isReady) return;
+    if (backgroundUrl && (drawMode === 'ai-only' || drawMode === 'draw-together')) {
+      setBackgroundImage(backgroundUrl);
+    } else {
+      setBackgroundColor(drawMode === 'draw-everything' ? '#ffffff' : '#f5f5f5');
+    }
+  }, [isReady, backgroundUrl, drawMode, setBackgroundImage, setBackgroundColor]);
 
   if (status === 'unauthenticated') {
     router.push('/login');
@@ -68,20 +82,8 @@ export default function IllustratePage({ params }: { params: { storyId: string }
 
     setSaving(true);
     try {
-      let compositeUrl = '';
-      let childDrawingUrl = '';
-
-      if (drawMode === 'ai-only') {
-        // Just use AI background
-        compositeUrl = await exportAsDataUrl(true);
-      } else if (drawMode === 'draw-everything') {
-        // Just child drawing (no background)
-        compositeUrl = await exportAsDataUrl(false);
-      } else {
-        // AI background + child drawing composite
-        compositeUrl = await exportAsDataUrl(false);
-        childDrawingUrl = await exportAsDataUrl(false);
-      }
+      const compositeUrl = await exportAsDataUrl();
+      const childDrawingUrl = drawMode === 'draw-together' ? compositeUrl : '';
 
       // Upload to API
       const res = await fetch('/api/upload', {
@@ -227,10 +229,7 @@ export default function IllustratePage({ params }: { params: { storyId: string }
         </Card>
 
         <Card className="p-6 mb-6 flex justify-center bg-white">
-          <DrawingCanvas
-            backgroundUrl={drawMode === 'ai-only' ? backgroundUrl : drawMode === 'draw-together' ? backgroundUrl : null}
-            fallbackColor={drawMode === 'draw-everything' ? '#ffffff' : '#f5f5f5'}
-          />
+          <DrawingCanvas ref={canvasElRef} />
         </Card>
 
         <div className="flex gap-4 justify-center">

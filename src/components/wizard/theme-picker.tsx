@@ -50,7 +50,7 @@ export function ThemePicker({ value, onChange }: ThemePickerProps) {
             onChange(e.target.value);
             setUseCustom(true);
           }}
-          className="w-full px-4 py-3 rounded-xl border-2 border-purple-200 focus:border-purple-500 focus:outline-none text-base"
+          className="w-full px-4 py-3 rounded-xl border-2 border-purple-200 focus:border-purple-500 focus:outline-none text-base text-gray-900 placeholder-gray-400"
         />
       </div>
     </div>

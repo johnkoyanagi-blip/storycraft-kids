@@ -1,8 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-// eslint-disable-next-line @typescript-eslint/no-var-requires
-const fabric = (typeof window !== 'undefined' ? require('fabric').fabric : null) as any;
+import * as fabric from 'fabric';
 
 export interface DrawingState {
   currentTool: 'pen' | 'eraser';
@@ -15,9 +14,19 @@ interface CanvasState {
   json: any;
 }
 
+const CANVAS_WIDTH = 800;
+const CANVAS_HEIGHT = 600;
+
 export function useDrawingCanvas() {
-  const canvasRef = useRef<any>(null);
-  const containerRef = useRef<HTMLDivElement>(null);
+  const canvasRef = useRef<fabric.Canvas | null>(null);
+  // Store the canvas DOM element in state so the init effect re-runs
+  // the moment the element mounts (it may not be in the DOM on first render
+  // when the parent conditionally shows a different screen).
+  const [canvasEl, setCanvasEl] = useState<HTMLCanvasElement | null>(null);
+  const canvasElRef = useCallback((node: HTMLCanvasElement | null) => {
+    setCanvasEl(node);
+  }, []);
+
   const [drawingState, setDrawingState] = useState<DrawingState>({
     currentTool: 'pen',
     brushSize: 5,
@@ -25,233 +34,226 @@ export function useDrawingCanvas() {
   });
   const [canUndo, setCanUndo] = useState(false);
   const [canRedo, setCanRedo] = useState(false);
+  const [isReady, setIsReady] = useState(false);
 
   const undoStackRef = useRef<CanvasState[]>([]);
   const redoStackRef = useRef<CanvasState[]>([]);
-  const MAX_UNDO_STEPS = 20;
+  // The "last known good" snapshot — represents the state BEFORE the next
+  // mutation. Pushed onto the undo stack when a mutation occurs, then replaced
+  // with the new post-mutation snapshot.
+  const lastSnapshotRef = useRef<CanvasState | null>(null);
+  // Guard so programmatic loads (undo/redo/setBackground) don't generate new
+  // history entries via the object:added listener.
+  const suppressHistoryRef = useRef(false);
+  const MAX_UNDO_STEPS = 30;
 
-  // Initialize canvas
+  // Initialize canvas when the element is mounted
   useEffect(() => {
-    if (!containerRef.current) return;
+    if (!canvasEl) return;
 
-    const canvas = new fabric.Canvas('drawing-canvas', {
-      width: 1024,
-      height: 768,
-      backgroundColor: 'transparent',
+    // Set intrinsic dimensions on the element BEFORE Fabric touches it.
+    canvasEl.width = CANVAS_WIDTH;
+    canvasEl.height = CANVAS_HEIGHT;
+
+    const canvas = new fabric.Canvas(canvasEl, {
+      width: CANVAS_WIDTH,
+      height: CANVAS_HEIGHT,
+      backgroundColor: '#ffffff',
       isDrawingMode: true,
     });
 
     canvasRef.current = canvas;
 
-    // Configure initial brush
-    canvas.freeDrawingBrush = new fabric.PencilBrush(canvas);
-    canvas.freeDrawingBrush.color = drawingState.color;
-    canvas.freeDrawingBrush.width = drawingState.brushSize;
+    // Configure initial brush (v7 requires a brush instance)
+    const brush = new fabric.PencilBrush(canvas);
+    brush.color = '#000000';
+    brush.width = 5;
+    canvas.freeDrawingBrush = brush;
 
-    // Save initial state
     undoStackRef.current = [];
     redoStackRef.current = [];
+    // Initial "empty canvas" snapshot serves as the floor of the undo stack.
+    lastSnapshotRef.current = { json: canvas.toJSON() };
 
-    // Handle drawing events
-    canvas.on('object:added', () => {
-      // Save state after drawing
-      setTimeout(() => {
-        const state = canvas.toJSON();
-        undoStackRef.current.push({ json: state });
+    const captureHistory = () => {
+      if (suppressHistoryRef.current) return;
+      // Push the PREVIOUS snapshot onto the undo stack, then refresh.
+      if (lastSnapshotRef.current) {
+        undoStackRef.current.push(lastSnapshotRef.current);
         if (undoStackRef.current.length > MAX_UNDO_STEPS) {
           undoStackRef.current.shift();
         }
-        redoStackRef.current = [];
-        setCanUndo(undoStackRef.current.length > 0);
-        setCanRedo(false);
-      }, 50);
-    });
+      }
+      lastSnapshotRef.current = { json: canvas.toJSON() };
+      redoStackRef.current = [];
+      setCanUndo(undoStackRef.current.length > 0);
+      setCanRedo(false);
+    };
+
+    canvas.on('object:added', captureHistory);
+    canvas.on('object:modified', captureHistory);
+    canvas.on('object:removed', captureHistory);
+
+    setIsReady(true);
 
     return () => {
       canvas.dispose();
+      canvasRef.current = null;
+      setIsReady(false);
     };
-  }, []);
+  }, [canvasEl]);
 
-  // Update brush properties when drawing state changes
+  // Update brush whenever drawing state changes
   useEffect(() => {
-    if (!canvasRef.current) return;
-
     const canvas = canvasRef.current;
+    if (!canvas || !canvas.freeDrawingBrush) return;
 
     if (drawingState.currentTool === 'eraser') {
-      // For eraser, use a light color on transparent background
-      if (canvas.freeDrawingBrush instanceof fabric.PencilBrush) {
-        canvas.freeDrawingBrush.color = 'rgba(255, 255, 255, 0.5)';
-      }
-      // Eraser effect by clearing with destination-out
-      canvas.isDrawingMode = true;
-      if (canvas.freeDrawingBrush instanceof fabric.PencilBrush) {
-        canvas.freeDrawingBrush.width = drawingState.brushSize;
-      }
+      // Simple eraser: draws with the current background color
+      canvas.freeDrawingBrush.color = '#ffffff';
     } else {
-      // Pen tool
-      if (canvas.freeDrawingBrush instanceof fabric.PencilBrush) {
-        canvas.freeDrawingBrush.color = drawingState.color;
-        canvas.freeDrawingBrush.width = drawingState.brushSize;
-      }
+      canvas.freeDrawingBrush.color = drawingState.color;
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [drawingState]);
+    canvas.freeDrawingBrush.width = drawingState.brushSize;
+  }, [drawingState, isReady]);
 
   const setTool = useCallback((tool: 'pen' | 'eraser') => {
-    setDrawingState((prev) => ({
-      ...prev,
-      currentTool: tool,
-    }));
+    setDrawingState((prev) => ({ ...prev, currentTool: tool }));
   }, []);
 
   const setBrushSize = useCallback((size: number) => {
-    setDrawingState((prev) => ({
-      ...prev,
-      brushSize: size,
-    }));
+    setDrawingState((prev) => ({ ...prev, brushSize: size }));
   }, []);
 
   const setColor = useCallback((color: string) => {
-    setDrawingState((prev) => ({
-      ...prev,
-      color,
-    }));
+    setDrawingState((prev) => ({ ...prev, color }));
   }, []);
 
   const undo = useCallback(() => {
-    if (!canvasRef.current || undoStackRef.current.length === 0) return;
-
     const canvas = canvasRef.current;
-    // Save current state to redo stack
-    const currentState = canvas.toJSON();
-    redoStackRef.current.push({ json: currentState });
+    if (!canvas || undoStackRef.current.length === 0) return;
 
-    // Load previous state
+    // Current state → redo stack. Previous snapshot → become current.
+    const currentSnapshot = lastSnapshotRef.current ?? { json: canvas.toJSON() };
+    redoStackRef.current.push(currentSnapshot);
+
     const previousState = undoStackRef.current.pop();
-    if (previousState) {
-      canvas.loadFromJSON(previousState.json, () => {
-        canvas.renderAll();
-        setCanUndo(undoStackRef.current.length > 0);
-        setCanRedo(true);
-      });
-    }
+    if (!previousState) return;
+
+    suppressHistoryRef.current = true;
+    canvas.loadFromJSON(previousState.json).then(() => {
+      canvas.renderAll();
+      lastSnapshotRef.current = previousState;
+      suppressHistoryRef.current = false;
+      setCanUndo(undoStackRef.current.length > 0);
+      setCanRedo(true);
+    });
   }, []);
 
   const redo = useCallback(() => {
-    if (!canvasRef.current || redoStackRef.current.length === 0) return;
-
     const canvas = canvasRef.current;
-    // Save current state to undo stack
-    const currentState = canvas.toJSON();
-    undoStackRef.current.push({ json: currentState });
+    if (!canvas || redoStackRef.current.length === 0) return;
 
-    // Load next state
+    const currentSnapshot = lastSnapshotRef.current ?? { json: canvas.toJSON() };
+    undoStackRef.current.push(currentSnapshot);
+
     const nextState = redoStackRef.current.pop();
-    if (nextState) {
-      canvas.loadFromJSON(nextState.json, () => {
-        canvas.renderAll();
-        setCanUndo(true);
-        setCanRedo(redoStackRef.current.length > 0);
-      });
-    }
+    if (!nextState) return;
+
+    suppressHistoryRef.current = true;
+    canvas.loadFromJSON(nextState.json).then(() => {
+      canvas.renderAll();
+      lastSnapshotRef.current = nextState;
+      suppressHistoryRef.current = false;
+      setCanUndo(true);
+      setCanRedo(redoStackRef.current.length > 0);
+    });
   }, []);
 
   const clearAll = useCallback(() => {
-    if (!canvasRef.current) return;
+    const canvas = canvasRef.current;
+    if (!canvas) return;
 
-    canvasRef.current.clear();
+    suppressHistoryRef.current = true;
+    canvas.clear();
+    canvas.backgroundColor = '#ffffff';
+    canvas.renderAll();
+    suppressHistoryRef.current = false;
     undoStackRef.current = [];
     redoStackRef.current = [];
+    lastSnapshotRef.current = { json: canvas.toJSON() };
     setCanUndo(false);
     setCanRedo(false);
   }, []);
 
-  const setBackgroundImage = useCallback((imageUrl: string) => {
-    if (!canvasRef.current) return;
-
+  const setBackgroundImage = useCallback(async (imageUrl: string) => {
     const canvas = canvasRef.current;
-    fabric.Image.fromURL(
-      imageUrl,
-      (img: any) => {
-        // Scale image to fit canvas
-        const scale = Math.min(
-          canvas.width! / img.width!,
-          canvas.height! / img.height!
-        );
-        img.set({
-          scaleX: scale,
-          scaleY: scale,
-          left: (canvas.width! - img.width! * scale) / 2,
-          top: (canvas.height! - img.height! * scale) / 2,
-        });
+    if (!canvas) return;
 
-        canvas.setBackgroundImage(img as any, () => {
-          canvas.renderAll();
-        });
-      },
-      { crossOrigin: 'anonymous' }
-    );
-  }, []);
-
-  const exportAsDataUrl = useCallback(
-    async (backgroundOnly = false): Promise<string> => {
-      if (!canvasRef.current) return '';
-
-      const canvas = canvasRef.current;
-
-      // If background only, return background as data URL
-      if (backgroundOnly) {
-        // Create a temporary canvas with just the background
-        const tempCanvas = new fabric.Canvas(null, {
-          width: 1024,
-          height: 768,
-        });
-
-        const bg = canvas.backgroundImage;
-        if (bg) {
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          tempCanvas.setBackgroundImage(bg as any, () => {
-            tempCanvas.renderAll();
-          });
-        } else {
-          tempCanvas.backgroundColor = 'white';
-        }
-
-        // Wait for async operations
-        await new Promise((resolve) => setTimeout(resolve, 100));
-
-        const dataUrl = tempCanvas.toDataURL({
-          format: 'png',
-          multiplier: 1,
-          left: 0,
-          top: 0,
-          width: 1024,
-          height: 768,
-        });
-
-        tempCanvas.dispose();
-        return dataUrl;
+    // Route any non-same-origin URL through our proxy so that:
+    //   1. CORS on the upstream CDN can never block us.
+    //   2. The canvas stays untainted so toDataURL() works for saving.
+    let finalUrl = imageUrl;
+    try {
+      const parsed = new URL(imageUrl, window.location.origin);
+      if (parsed.origin !== window.location.origin) {
+        finalUrl = `/api/proxy-image?url=${encodeURIComponent(imageUrl)}`;
       }
+    } catch {
+      // Relative URL — use as-is
+    }
 
-      // Export full composite (background + drawing)
-      const dataUrl = canvas.toDataURL({
-        format: 'png',
-        multiplier: 1,
-        left: 0,
-        top: 0,
-        width: 1024,
-        height: 768,
+    suppressHistoryRef.current = true;
+    try {
+      const img = await fabric.FabricImage.fromURL(finalUrl, { crossOrigin: 'anonymous' });
+
+      // Scale image to fit canvas
+      const scale = Math.min(
+        CANVAS_WIDTH / (img.width || 1),
+        CANVAS_HEIGHT / (img.height || 1)
+      );
+      img.set({
+        scaleX: scale,
+        scaleY: scale,
+        left: (CANVAS_WIDTH - (img.width || 0) * scale) / 2,
+        top: (CANVAS_HEIGHT - (img.height || 0) * scale) / 2,
+        selectable: false,
+        evented: false,
       });
 
-      return dataUrl;
-    },
-    []
-  );
+      // In fabric v7, backgroundImage is a property
+      canvas.backgroundImage = img;
+      canvas.renderAll();
+      // Refresh the snapshot floor so undo doesn't try to undo the background.
+      lastSnapshotRef.current = { json: canvas.toJSON() };
+    } catch (err) {
+      console.error('[DrawingCanvas] Failed to load background image:', err);
+    } finally {
+      suppressHistoryRef.current = false;
+    }
+  }, []);
+
+  const setBackgroundColor = useCallback((color: string) => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    canvas.backgroundColor = color;
+    canvas.renderAll();
+  }, []);
+
+  const exportAsDataUrl = useCallback(async (): Promise<string> => {
+    const canvas = canvasRef.current;
+    if (!canvas) return '';
+
+    return canvas.toDataURL({
+      format: 'png',
+      multiplier: 1,
+    });
+  }, []);
 
   return {
-    containerRef,
     canvasRef,
+    canvasElRef,
+    isReady,
     drawingState,
     canUndo,
     canRedo,
@@ -262,6 +264,7 @@ export function useDrawingCanvas() {
     redo,
     clearAll,
     setBackgroundImage,
+    setBackgroundColor,
     exportAsDataUrl,
   };
 }

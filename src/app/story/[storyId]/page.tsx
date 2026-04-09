@@ -8,8 +8,20 @@ import { LoadingSpinner } from '@/components/ui/loading-spinner';
 export default function StoryPage({ params }: { params: { storyId: string } }) {
   const { status } = useSession();
   const router = useRouter();
-  const { storyContext, fullNarrative, currentChoices, isLoading, illustrationMoment, error, submitBeatChoice } =
-    useStorySession(params.storyId);
+  const {
+    storyContext,
+    fullNarrative,
+    currentChoices,
+    isLoading,
+    illustrationMoment,
+    error,
+    submitBeatChoice,
+    continueStory,
+    updateNarrative,
+    undoLastPart,
+    rewriteLastPart,
+    skipIllustration,
+  } = useStorySession(params.storyId);
 
   if (status === 'unauthenticated') {
     router.push('/login');
@@ -29,6 +41,11 @@ export default function StoryPage({ params }: { params: { storyId: string } }) {
       illustrationMoment={illustrationMoment}
       error={error}
       onChoice={submitBeatChoice}
+      onContinue={continueStory}
+      onNarrativeChange={updateNarrative}
+      onUndo={undoLastPart}
+      onRewrite={rewriteLastPart}
+      onSkipIllustration={skipIllustration}
     />
   );
 }
