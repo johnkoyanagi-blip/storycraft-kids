@@ -26,7 +26,7 @@ export const GENRE_STYLES: Record<string, { id: string; promptPrefix: string }> 
 };
 
 const DEFAULT_STYLE = GENRE_STYLES['funny'];
-const NEGATIVE_PROMPT = 'realistic, photographic, scary, violent, weapons, blood, nudity, adult content, dark, depressing';
+const NEGATIVE_PROMPT = 'realistic, photographic, scary, violent, weapons, blood, nudity, adult content, dark, depressing, people, person, character, human, animal, figure, face, hands';
 
 export function getArtStyle(genre: string): string {
   return (GENRE_STYLES[genre.toLowerCase()] || DEFAULT_STYLE).id;

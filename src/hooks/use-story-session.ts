@@ -107,11 +107,12 @@ export function useStorySession(storyId: string) {
           isLoading: false,
         };
       });
-    } catch (_err) {
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed to continue story';
       setState((prev) => ({
         ...prev,
         isLoading: false,
-        error: 'Failed to continue story. Please try again!',
+        error: message,
       }));
     }
   }

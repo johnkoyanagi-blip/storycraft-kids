@@ -21,9 +21,10 @@ export async function generateBeat(context: StoryContext, childInput: string): P
   const arcGuidance = arcManager.getPromptGuidance(context.arcPosition, context.beatCount);
   const userPrompt = buildBeatPrompt(context, childInput, arcGuidance);
 
-  if (!process.env.ANTHROPIC_API_KEY) {
-    console.error('[StoryCraft] ANTHROPIC_API_KEY is not set! Using fallback response.');
-    return FALLBACK_RESPONSE;
+  const apiKey = process.env.ANTHROPIC_API_KEY;
+  if (!apiKey || apiKey.trim().length === 0) {
+    console.error('[StoryCraft] ANTHROPIC_API_KEY is not set or empty! Value:', JSON.stringify(apiKey));
+    throw new Error('Story AI is not configured. Please check your ANTHROPIC_API_KEY in .env.local and restart the server.');
   }
 
   for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
@@ -35,7 +36,9 @@ export async function generateBeat(context: StoryContext, childInput: string): P
         system: systemPrompt,
         messages: [{ role: 'user', content: userPrompt }],
       });
-      const text = (response.content[0] as any).text;
+      let text: string = (response.content[0] as any).text;
+      // Claude sometimes wraps JSON in markdown code fences — strip them.
+      text = text.replace(/^```(?:json)?\s*\n?/i, '').replace(/\n?```\s*$/i, '').trim();
       const parsed = JSON.parse(text);
       const filterResult = await contentFilter.check(parsed.storyText);
       if (!filterResult.safe) {
@@ -65,6 +68,6 @@ export async function generateBeat(context: StoryContext, childInput: string): P
       }
     }
   }
-  console.error('[StoryCraft] All retries failed, using fallback response.');
-  return FALLBACK_RESPONSE;
+  console.error('[StoryCraft] All retries failed. Check server logs above for the specific error.');
+  throw new Error('Story AI is having trouble right now. Please check the server terminal for details and try again.');
 }

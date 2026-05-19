@@ -35,7 +35,14 @@ export async function POST(req: Request, { params }: { params: { storyId: string
     };
   }
 
-  const beatResponse = await generateBeat(context, childInput);
+  let beatResponse;
+  try {
+    beatResponse = await generateBeat(context, childInput);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Failed to generate story beat';
+    console.error('[StoryCraft] Beat generation threw:', message);
+    return NextResponse.json({ error: message }, { status: 500 });
+  }
 
   const beat = await prisma.storyBeat.create({
     data: {

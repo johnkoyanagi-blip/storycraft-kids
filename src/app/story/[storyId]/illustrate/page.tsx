@@ -8,6 +8,7 @@ import { LoadingSpinner } from '@/components/ui/loading-spinner';
 import { DrawingCanvas } from '@/components/canvas/drawing-canvas';
 import { Toolbar } from '@/components/canvas/toolbar';
 import { ColorPalette } from '@/components/canvas/color-palette';
+import { StickerPicker } from '@/components/canvas/sticker-picker';
 import { useDrawingCanvas } from '@/hooks/use-drawing-canvas';
 
 type Step = 'choice' | 'generating' | 'drawing';
@@ -21,6 +22,7 @@ export default function IllustratePage({ params }: { params: { storyId: string }
     'draw-together'
   );
   const [saving, setSaving] = useState(false);
+  const [generateError, setGenerateError] = useState<string | null>(null);
 
   const {
     canvasRef,
@@ -37,6 +39,11 @@ export default function IllustratePage({ params }: { params: { storyId: string }
     clearAll,
     setBackgroundImage,
     setBackgroundColor,
+    addShape,
+    addText,
+    addSticker,
+    fillBackground,
+    deleteSelected,
     exportAsDataUrl,
   } = useDrawingCanvas();
 
@@ -57,6 +64,7 @@ export default function IllustratePage({ params }: { params: { storyId: string }
 
   async function handleGenerateBackground() {
     setStep('generating');
+    setGenerateError(null);
     try {
       const res = await fetch('/api/illustrations/generate', {
         method: 'POST',
@@ -64,15 +72,22 @@ export default function IllustratePage({ params }: { params: { storyId: string }
         body: JSON.stringify({ storyId: params.storyId }),
       });
 
-      if (res.ok) {
-        const data = await res.json();
+      const data = await res.json();
+
+      if (res.ok && data.success && data.url) {
         setBackgroundUrl(data.url);
         setStep('drawing');
       } else {
+        // AI generation failed — offer choices
+        console.warn('[StoryCraft] Illustration generation failed:', data);
+        setGenerateError(
+          data.error || 'The AI artist couldn\'t create an image right now. You can try again or draw your own!'
+        );
         setStep('choice');
       }
     } catch (err) {
       console.error('Failed to generate background:', err);
+      setGenerateError('Could not reach the AI artist. Check your internet connection and try again!');
       setStep('choice');
     }
   }
@@ -121,6 +136,12 @@ export default function IllustratePage({ params }: { params: { storyId: string }
             <p className="text-purple-600 mb-8 text-lg font-semibold">
               How would you like to illustrate this moment?
             </p>
+
+            {generateError && (
+              <div className="bg-red-50 border-2 border-red-300 rounded-xl p-4 mb-6 text-left">
+                <p className="text-red-700 font-semibold text-sm">{generateError}</p>
+              </div>
+            )}
 
             <div className="space-y-3 mb-8">
               <button
@@ -216,6 +237,10 @@ export default function IllustratePage({ params }: { params: { storyId: string }
               onUndo={undo}
               onRedo={redo}
               onClearAll={clearAll}
+              onAddShape={addShape}
+              onAddText={() => addText()}
+              onFillBackground={fillBackground}
+              onDeleteSelected={deleteSelected}
             />
           </div>
 
@@ -226,9 +251,14 @@ export default function IllustratePage({ params }: { params: { storyId: string }
               onColorChange={setColor}
             />
           </div>
+
+          <div>
+            <div className="text-sm font-semibold text-purple-700 mb-2">Stickers</div>
+            <StickerPicker onPick={addSticker} />
+          </div>
         </Card>
 
-        <Card className="p-6 mb-6 flex justify-center bg-white">
+        <Card className="p-6 mb-6 bg-white text-center">
           <DrawingCanvas ref={canvasElRef} />
         </Card>
 

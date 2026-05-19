@@ -3,8 +3,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import * as fabric from 'fabric';
 
+export type DrawingTool = 'pen' | 'eraser' | 'select';
+
 export interface DrawingState {
-  currentTool: 'pen' | 'eraser';
+  currentTool: DrawingTool;
   brushSize: number;
   color: string;
 }
@@ -19,6 +21,10 @@ const CANVAS_HEIGHT = 600;
 
 export function useDrawingCanvas() {
   const canvasRef = useRef<fabric.Canvas | null>(null);
+  // The HTMLImageElement of the current AI background, kept around so we can
+  // composite it into the exported PNG via an offscreen canvas.
+  const bgImageRef = useRef<HTMLImageElement | null>(null);
+
   // Store the canvas DOM element in state so the init effect re-runs
   // the moment the element mounts (it may not be in the DOM on first render
   // when the parent conditionally shows a different screen).
@@ -47,6 +53,22 @@ export function useDrawingCanvas() {
   const suppressHistoryRef = useRef(false);
   const MAX_UNDO_STEPS = 30;
 
+  const captureHistory = useCallback(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    if (suppressHistoryRef.current) return;
+    if (lastSnapshotRef.current) {
+      undoStackRef.current.push(lastSnapshotRef.current);
+      if (undoStackRef.current.length > MAX_UNDO_STEPS) {
+        undoStackRef.current.shift();
+      }
+    }
+    lastSnapshotRef.current = { json: canvas.toJSON() };
+    redoStackRef.current = [];
+    setCanUndo(undoStackRef.current.length > 0);
+    setCanRedo(false);
+  }, []);
+
   // Initialize canvas when the element is mounted
   useEffect(() => {
     if (!canvasEl) return;
@@ -60,7 +82,18 @@ export function useDrawingCanvas() {
       height: CANVAS_HEIGHT,
       backgroundColor: '#ffffff',
       isDrawingMode: true,
+      enableRetinaScaling: false,
     });
+
+    // Fabric v7 wraps the canvas in a block-level container div.
+    // Block elements expand to fill their parent — which makes our
+    // fit-content wrapper create a circular sizing dependency.
+    // Fix: force Fabric's wrapper to inline-block so it shrink-wraps.
+    const lowerEl = canvas.getElement();
+    const fabricWrapper = lowerEl.parentElement;
+    if (fabricWrapper) {
+      fabricWrapper.style.display = 'inline-block';
+    }
 
     canvasRef.current = canvas;
 
@@ -75,21 +108,6 @@ export function useDrawingCanvas() {
     // Initial "empty canvas" snapshot serves as the floor of the undo stack.
     lastSnapshotRef.current = { json: canvas.toJSON() };
 
-    const captureHistory = () => {
-      if (suppressHistoryRef.current) return;
-      // Push the PREVIOUS snapshot onto the undo stack, then refresh.
-      if (lastSnapshotRef.current) {
-        undoStackRef.current.push(lastSnapshotRef.current);
-        if (undoStackRef.current.length > MAX_UNDO_STEPS) {
-          undoStackRef.current.shift();
-        }
-      }
-      lastSnapshotRef.current = { json: canvas.toJSON() };
-      redoStackRef.current = [];
-      setCanUndo(undoStackRef.current.length > 0);
-      setCanRedo(false);
-    };
-
     canvas.on('object:added', captureHistory);
     canvas.on('object:modified', captureHistory);
     canvas.on('object:removed', captureHistory);
@@ -101,12 +119,16 @@ export function useDrawingCanvas() {
       canvasRef.current = null;
       setIsReady(false);
     };
-  }, [canvasEl]);
+  }, [canvasEl, captureHistory]);
 
-  // Update brush whenever drawing state changes
+  // Sync tool/brush state to the canvas
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas || !canvas.freeDrawingBrush) return;
+
+    const isDrawing =
+      drawingState.currentTool === 'pen' || drawingState.currentTool === 'eraser';
+    canvas.isDrawingMode = isDrawing;
 
     if (drawingState.currentTool === 'eraser') {
       // Simple eraser: draws with the current background color
@@ -117,7 +139,7 @@ export function useDrawingCanvas() {
     canvas.freeDrawingBrush.width = drawingState.brushSize;
   }, [drawingState, isReady]);
 
-  const setTool = useCallback((tool: 'pen' | 'eraser') => {
+  const setTool = useCallback((tool: DrawingTool) => {
     setDrawingState((prev) => ({ ...prev, currentTool: tool }));
   }, []);
 
@@ -170,6 +192,17 @@ export function useDrawingCanvas() {
     });
   }, []);
 
+  // Clear the CSS background image on Fabric's wrapper div.
+  const clearWrapperBackground = useCallback(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    bgImageRef.current = null;
+    const fabricWrapper = canvas.getElement().parentElement;
+    if (fabricWrapper) {
+      fabricWrapper.style.backgroundImage = '';
+    }
+  }, []);
+
   const clearAll = useCallback(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -177,6 +210,7 @@ export function useDrawingCanvas() {
     suppressHistoryRef.current = true;
     canvas.clear();
     canvas.backgroundColor = '#ffffff';
+    clearWrapperBackground();
     canvas.renderAll();
     suppressHistoryRef.current = false;
     undoStackRef.current = [];
@@ -184,8 +218,14 @@ export function useDrawingCanvas() {
     lastSnapshotRef.current = { json: canvas.toJSON() };
     setCanUndo(false);
     setCanRedo(false);
-  }, []);
+  }, [clearWrapperBackground]);
 
+  // Render the AI background via CSS on Fabric's wrapper div instead of through
+  // Fabric's backgroundImage property. Fabric v7's render pipeline applies a
+  // transform that mis-scales the image (especially at sub-1.0 DPR), shrinking
+  // it to ~55% of the canvas. By using a plain CSS background-image we sidestep
+  // Fabric's pipeline entirely; the browser renders the image at the wrapper's
+  // box size. On export we composite the image into the PNG manually.
   const setBackgroundImage = useCallback(async (imageUrl: string) => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -203,46 +243,195 @@ export function useDrawingCanvas() {
       // Relative URL — use as-is
     }
 
-    suppressHistoryRef.current = true;
     try {
-      const img = await fabric.FabricImage.fromURL(finalUrl, { crossOrigin: 'anonymous' });
-
-      // Scale image to fit canvas
-      const scale = Math.min(
-        CANVAS_WIDTH / (img.width || 1),
-        CANVAS_HEIGHT / (img.height || 1)
-      );
-      img.set({
-        scaleX: scale,
-        scaleY: scale,
-        left: (CANVAS_WIDTH - (img.width || 0) * scale) / 2,
-        top: (CANVAS_HEIGHT - (img.height || 0) * scale) / 2,
-        selectable: false,
-        evented: false,
+      // Preload so the image is decoded by the time we apply CSS, and so we
+      // can composite it into the exported PNG.
+      const htmlImg = await new Promise<HTMLImageElement>((resolve, reject) => {
+        const el = new Image();
+        el.crossOrigin = 'anonymous';
+        el.onload = () => resolve(el);
+        el.onerror = () => reject(new Error('Image load failed'));
+        el.src = finalUrl;
       });
 
-      // In fabric v7, backgroundImage is a property
-      canvas.backgroundImage = img;
+      bgImageRef.current = htmlImg;
+
+      const fabricWrapper = canvas.getElement().parentElement;
+      if (fabricWrapper) {
+        fabricWrapper.style.backgroundImage = `url("${finalUrl}")`;
+        fabricWrapper.style.backgroundSize = '100% 100%';
+        fabricWrapper.style.backgroundRepeat = 'no-repeat';
+        fabricWrapper.style.backgroundPosition = 'center';
+      }
+
+      // Make Fabric's canvas transparent so the CSS background shows through.
+      // Empty string is falsy in Fabric's _renderBackground check, so the
+      // backing-store fillRect is skipped.
+      suppressHistoryRef.current = true;
+      canvas.backgroundColor = '';
       canvas.renderAll();
-      // Refresh the snapshot floor so undo doesn't try to undo the background.
       lastSnapshotRef.current = { json: canvas.toJSON() };
+      suppressHistoryRef.current = false;
     } catch (err) {
       console.error('[DrawingCanvas] Failed to load background image:', err);
-    } finally {
-      suppressHistoryRef.current = false;
     }
   }, []);
 
-  const setBackgroundColor = useCallback((color: string) => {
+  const setBackgroundColor = useCallback(
+    (color: string) => {
+      const canvas = canvasRef.current;
+      if (!canvas) return;
+      clearWrapperBackground();
+      canvas.backgroundColor = color;
+      canvas.renderAll();
+    },
+    [clearWrapperBackground]
+  );
+
+  // ──────────────────────────────────────────────────────────────────
+  // Drawing tools: shapes / text / stickers / fill / delete
+  // Each adds an object at canvas center, selects it, and switches the tool
+  // to 'select' so the user can immediately drag/resize/rotate.
+  // ──────────────────────────────────────────────────────────────────
+
+  const addShape = useCallback(
+    (shape: 'circle' | 'square' | 'line') => {
+      const canvas = canvasRef.current;
+      if (!canvas) return;
+
+      const cx = CANVAS_WIDTH / 2;
+      const cy = CANVAS_HEIGHT / 2;
+      let obj: fabric.FabricObject;
+
+      if (shape === 'circle') {
+        obj = new fabric.Circle({
+          left: cx - 60,
+          top: cy - 60,
+          radius: 60,
+          fill: drawingState.color,
+          stroke: '#000000',
+          strokeWidth: 2,
+        });
+      } else if (shape === 'square') {
+        obj = new fabric.Rect({
+          left: cx - 60,
+          top: cy - 60,
+          width: 120,
+          height: 120,
+          fill: drawingState.color,
+          stroke: '#000000',
+          strokeWidth: 2,
+        });
+      } else {
+        obj = new fabric.Line([cx - 100, cy, cx + 100, cy], {
+          stroke: drawingState.color,
+          strokeWidth: Math.max(drawingState.brushSize, 4),
+        });
+      }
+
+      canvas.add(obj);
+      canvas.setActiveObject(obj);
+      canvas.renderAll();
+      setDrawingState((prev) => ({ ...prev, currentTool: 'select' }));
+    },
+    [drawingState.color, drawingState.brushSize]
+  );
+
+  const addText = useCallback(
+    (initial: string = 'Tap to edit') => {
+      const canvas = canvasRef.current;
+      if (!canvas) return;
+
+      const obj = new fabric.IText(initial, {
+        left: CANVAS_WIDTH / 2 - 100,
+        top: CANVAS_HEIGHT / 2 - 20,
+        fontSize: 40,
+        fontFamily: 'Arial, sans-serif',
+        fontWeight: 'bold',
+        fill: drawingState.color,
+      });
+
+      canvas.add(obj);
+      canvas.setActiveObject(obj);
+      canvas.renderAll();
+      setDrawingState((prev) => ({ ...prev, currentTool: 'select' }));
+    },
+    [drawingState.color]
+  );
+
+  const addSticker = useCallback((emoji: string) => {
     const canvas = canvasRef.current;
     if (!canvas) return;
-    canvas.backgroundColor = color;
+
+    const obj = new fabric.Text(emoji, {
+      left: CANVAS_WIDTH / 2 - 40,
+      top: CANVAS_HEIGHT / 2 - 40,
+      fontSize: 80,
+      fontFamily: 'Apple Color Emoji, Segoe UI Emoji, Noto Color Emoji, sans-serif',
+    });
+
+    canvas.add(obj);
+    canvas.setActiveObject(obj);
+    canvas.renderAll();
+    setDrawingState((prev) => ({ ...prev, currentTool: 'select' }));
+  }, []);
+
+  // "Fill bucket" — replaces the canvas backdrop with the current color.
+  // Removes any AI background; this is an undoable action.
+  const fillBackground = useCallback(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+
+    // Push current state onto undo stack before mutating.
+    if (lastSnapshotRef.current) {
+      undoStackRef.current.push(lastSnapshotRef.current);
+      if (undoStackRef.current.length > MAX_UNDO_STEPS) {
+        undoStackRef.current.shift();
+      }
+    }
+
+    clearWrapperBackground();
+    canvas.backgroundColor = drawingState.color;
+    canvas.renderAll();
+
+    lastSnapshotRef.current = { json: canvas.toJSON() };
+    redoStackRef.current = [];
+    setCanUndo(undoStackRef.current.length > 0);
+    setCanRedo(false);
+  }, [drawingState.color, clearWrapperBackground]);
+
+  const deleteSelected = useCallback(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const active = canvas.getActiveObjects();
+    if (active.length === 0) return;
+    active.forEach((obj) => canvas.remove(obj));
+    canvas.discardActiveObject();
     canvas.renderAll();
   }, []);
 
   const exportAsDataUrl = useCallback(async (): Promise<string> => {
     const canvas = canvasRef.current;
     if (!canvas) return '';
+
+    // Drop selection so handles don't appear in the export.
+    canvas.discardActiveObject();
+    canvas.renderAll();
+
+    // If a CSS background image is in play, composite it with the canvas
+    // content via an offscreen canvas (the CSS background isn't part of
+    // Fabric's toDataURL output).
+    if (bgImageRef.current) {
+      const offscreen = document.createElement('canvas');
+      offscreen.width = CANVAS_WIDTH;
+      offscreen.height = CANVAS_HEIGHT;
+      const ctx = offscreen.getContext('2d');
+      if (ctx) {
+        ctx.drawImage(bgImageRef.current, 0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+        ctx.drawImage(canvas.getElement(), 0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+        return offscreen.toDataURL('image/png');
+      }
+    }
 
     return canvas.toDataURL({
       format: 'png',
@@ -265,6 +454,11 @@ export function useDrawingCanvas() {
     clearAll,
     setBackgroundImage,
     setBackgroundColor,
+    addShape,
+    addText,
+    addSticker,
+    fillBackground,
+    deleteSelected,
     exportAsDataUrl,
   };
 }
